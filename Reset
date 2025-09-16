@@ -1,10 +1,7 @@
 HTB: Reset
-
-    Date Completed: August 12, 2025
-
-    Difficulty: Easy (Linux)
-
-    Methodology: Password reset abuse → LFI + log poisoning → RCE (www-data) → su to sadm → tmux leak → sudo/nano → root
+Date Completed: August 12, 2025
+Difficulty: Easy (Linux)
+Methodology: Password reset abuse → LFI + log poisoning → RCE (www-data) → su to sadm → tmux leak → sudo/nano → root
 
 #RECON
 
