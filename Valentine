@@ -1,6 +1,6 @@
 # HTB: Valentine
 - Date Completed: August 11, 2025
-- Difficulty: Easy (Retired)
+- Difficulty: Easy (Linux)
 - Methodology: Nmap vuln scan → Heartbleed exploitation → credential harvesting → SSH login with RSA key → privilege escalation via root-owned tmux session
 
 #RECON
