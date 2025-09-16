@@ -1,6 +1,6 @@
 #HTB: Writeup
 - Date completed: July 23, 2025
-- Difficulty: Easy
+- Difficulty: Easy (Linux)
 - Methodology: Web enumeration → SQL injection → hash cracking → SSH login → privesc via staff group + update-motd
 
 #Recon
