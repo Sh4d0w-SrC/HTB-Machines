@@ -1,6 +1,6 @@
 # HTB: Access
 - Date completed: July 28, 2025
-- Difficulty: Easy
+- Difficulty: Easy (Windows)
 - Methodology: Credential harvesting -> shell access through telnet -> privesc through misconfigured runas.
 
 #RECON
