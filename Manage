@@ -1,6 +1,6 @@
 # HTB: Manage
 - Date Completed: August 13, 2025
-- Difficulty: Easy (Retired)
+- Difficulty: Easy (Linux)
 - Methodology: BeanShooter -> Credential Harvesting / Reverse Shell -> Harvesting Backup Codes -> Pivoting to privileged user -> Creating a more privileged user -> sudo -i for root.
 
 #RECON
