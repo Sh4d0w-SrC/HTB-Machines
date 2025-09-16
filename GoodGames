@@ -1,6 +1,6 @@
 # HTB: GoodGames
 - Date completed: August 18, 2025
-- Difficulty: Easy (Retired)
+- Difficulty: Easy (Linux)
 - Methodology: SQL injection → Admin credential extraction → SSTI exploitation → Docker breakout → Privilege escalation
 
 #RECON
