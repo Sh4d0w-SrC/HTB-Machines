@@ -1,6 +1,6 @@
 # HTB: Shocker
 - Date completed: August 4, 2025
-- Difficulty: Easy (Retired)
+- Difficulty: Easy (Linux)
 - Summary: CGI Shellshock exploit for foothold -> GTFObins sudo perl for privesc
 
 #RECON
