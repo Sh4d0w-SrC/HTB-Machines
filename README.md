@@ -31,3 +31,5 @@ Each writeup follows a consistent methodology: reconnaissance, exploitation, and
 ### Disclaimer
 These writeups are for **educational purposes only** and cover **retired HTB machines**.  
 No active challenges or production systems are included.
+
+**License:** CC BY-NC 4.0
